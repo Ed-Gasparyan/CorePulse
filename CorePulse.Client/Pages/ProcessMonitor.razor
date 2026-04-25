@@ -1,0 +1,204 @@
+﻿@using System.Data.Common
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.SignalR.Client
+@implements IAsyncDisposable
+@using CorePulse.Shared.DTOs.Responses
+@inject Blazored.LocalStorage.ILocalStorageService localStorage
+@inject NavigationManager Navigation
+@attribute [Authorize]
+@page "/metrics"
+
+@if (!string.IsNullOrEmpty(connectionError))
+{
+    <div class="alert alert-danger d-flex align-items-center shadow-sm" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+        <div>
+            @connectionError
+        </div>
+        <button class="btn btn-danger btn-sm ms-auto" @onclick="OnInitializedAsync">
+            Try again
+        </button>
+    </div>
+}
+else if (isConnecting)
+{
+    <div class="d-flex justify-content-center">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Connecting to server...</span>
+        </div>
+    </div>
+}
+
+else if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        <strong>Error!</strong> @errorMessage
+        <button type="button" class="btn-close" @onclick="() => errorMessage = null"></button>
+    </div>
+}
+else
+{
+    <div class="input-group flex-nowrap mb-3">
+        <input type="text"
+               class="form-control"
+               placeholder="Search by process name..."
+               @oninput="HandleSearch" />
+    </div>
+
+    <div style="height:500px; overflow-y:auto;">
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Id</th>
+                    <th>Name</th>
+                    <th>MemoryUsage</th>
+                    <th>ThreadCount</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <Virtualize @ref="virtualizeComponent"
+                            TItem="ProcessMetricsDTO"
+                            ItemsProvider="LoadProcesses"
+                            Context="p">
+                    <ItemContent>
+                        <tr>
+                            <td>@p.Id</td>
+                            <td>@p.Name</td>
+                            <td>@p.MemoryUsage.ToString("N2") MB</td>
+                            <td>@p.ThreadCount</td>
+                            <td>
+                                @if (isAdmin)
+                                {
+                                    <button type="button"
+                                            class="btn btn-danger btn-sm"
+                                            disabled="@isSubmitting"
+                                            @onclick="() => HandleProcess(p.Id)">
+                                        Kill
+                                    </button>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">View Only</span>
+                                }
+                            </td>
+                        </tr>
+                    </ItemContent>
+                    <Placeholder>
+                        <tr><td colspan="6">Loading...</td></tr>
+                    </Placeholder>
+                </Virtualize>
+            </tbody>
+        </table>
+    </div>
+}
+
+@code
+{
+    private HubConnection? hubConnection;
+    private string? searchTerm;
+    private Virtualize<ProcessMetricsDTO>? virtualizeComponent;
+    private string? errorMessage;
+    private string? connectionError;
+    private bool isConnecting = true;
+    private bool isAdmin = false;
+    private bool isSubmitting = false;
+
+    /// <summary>
+    /// Acts as the data source for the Virtualize component.
+    /// Fetches only a window of data (paging) via SignalR to support massive process lists efficiently.
+    /// </summary>
+    private async ValueTask<ItemsProviderResult<ProcessMetricsDTO>> LoadProcesses(ItemsProviderRequest request)
+    {
+        if (hubConnection is null || hubConnection.State != HubConnectionState.Connected)
+        {
+            return new ItemsProviderResult<ProcessMetricsDTO>(Enumerable.Empty<ProcessMetricsDTO>(), 0);
+        }
+
+        try
+        {
+            var session = await localStorage.GetItemAsync<UserSessionDTO>("UserSession");
+            if (session != null) isAdmin = session.Role == "Admin";
+
+            // Remote Procedure Call (RPC) to get a paginated slice of system processes
+            var response = await hubConnection.InvokeAsync<PagedResultDTO<ProcessMetricsDTO>>(
+                "GetProcesses", request.StartIndex, request.Count, searchTerm);
+
+            return new ItemsProviderResult<ProcessMetricsDTO>(response.Items, response.TotalCount);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"SignalR Fetch Error: {ex.Message}");
+            return new ItemsProviderResult<ProcessMetricsDTO>(Enumerable.Empty<ProcessMetricsDTO>(), 0);
+        }
+    }
+
+    /// <summary>
+    /// Triggers the server to terminate a process by PID. Requires Admin role verification on the server.
+    /// </summary>
+    private async Task HandleProcess(int pid)
+    {
+        if (hubConnection is null || hubConnection.State != HubConnectionState.Connected) return;
+
+        isSubmitting = true;
+        errorMessage = null;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await hubConnection.InvokeAsync("KillProcessById", pid);
+
+            // Refresh the virtualized view to reflect the removed process
+            if (virtualizeComponent != null) await virtualizeComponent.RefreshDataAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Process termination failed: {ex.Message}";
+        }
+        finally
+        {
+            isSubmitting = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleSearch(ChangeEventArgs e)
+    {
+        searchTerm = e.Value?.ToString() ?? "";
+        if (virtualizeComponent != null) await virtualizeComponent.RefreshDataAsync();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl("https://localhost:7039/metricsHub", options =>
+            {
+                options.AccessTokenProvider = async () =>
+                {
+                    var session = await localStorage.GetItemAsync<UserSessionDTO>("UserSession");
+                    return session?.Token;
+                };
+            })
+            .WithAutomaticReconnect()
+            .Build();
+
+        try
+        {
+            await hubConnection.StartAsync();
+            if (virtualizeComponent != null) await virtualizeComponent.RefreshDataAsync();
+        }
+        catch
+        {
+            connectionError = "Unable to connect to real-time service.";
+        }
+        finally
+        {
+            isConnecting = false;
+            StateHasChanged();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (hubConnection is not null) await hubConnection.DisposeAsync();
+    }
+}

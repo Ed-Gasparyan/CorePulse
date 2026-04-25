@@ -1,0 +1,72 @@
+﻿@inherits LayoutComponentBase
+@inject NavigationManager Nav
+@inject Blazored.LocalStorage.ILocalStorageService localStorage
+@using Microsoft.AspNetCore.Components.Authorization
+
+<div class="d-flex" id="wrapper" style="min-height: 100vh;">
+    <div class="bg-dark border-right text-white" id="sidebar-wrapper" style="width: 250px;">
+        <div class="sidebar-heading p-4 fs-4 fw-bold border-bottom">
+            <i class="bi bi-cpu-fill me-2"></i>CorePulse
+        </div>
+        <div class="list-group list-group-flush p-2">
+            <NavLink class="list-group-item list-group-item-action bg-dark text-white border-0 rounded mb-1" href="/" Match="NavLinkMatch.All">
+                <i class="bi bi-house-door me-2"></i> Overview
+            </NavLink>
+            <NavLink class="list-group-item list-group-item-action bg-dark text-white border-0 rounded mb-1" href="/metrics">
+                <i class="bi bi-activity me-2"></i> System Metrics
+            </NavLink>
+
+            <AuthorizeView Roles="Admin">
+                <Authorized>
+                    <NavLink class="list-group-item list-group-item-action bg-dark text-white border-0 rounded mb-1" href="/logs">
+                        <i class="bi bi-journal-text me-2"></i> Activity Logs
+                    </NavLink>
+                </Authorized>
+            </AuthorizeView>
+
+            <hr />
+
+            <AuthorizeView>
+                <Authorized>
+                    <button class="list-group-item list-group-item-action bg-dark text-danger border-0" @onclick="HandleLogout">
+                        <i class="bi bi-box-arrow-right me-2"></i> Logout
+                    </button>
+                </Authorized>
+                <NotAuthorized>
+                    <NavLink class="list-group-item list-group-item-action bg-dark text-white border-0 rounded mb-1" href="/login">
+                        <i class="bi bi-box-arrow-in-right me-2"></i> Login
+                    </NavLink>
+                </NotAuthorized>
+            </AuthorizeView>
+        </div>
+    </div>
+
+    <div id="page-content-wrapper" class="flex-grow-1 bg-light">
+        <nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom shadow-sm px-4 py-3">
+            <div class="container-fluid">
+                <AuthorizeView>
+                    <Authorized>
+                        <span class="navbar-text fw-medium">
+                            Welcome back, <span class="text-primary">@context.User.Identity?.Name</span>
+                        </span>
+                    </Authorized>
+                    <NotAuthorized>
+                        <span class="navbar-text fw-medium">Welcome, <span class="text-primary">Guest</span></span>
+                    </NotAuthorized>
+                </AuthorizeView>
+            </div>
+        </nav>
+
+        <div class="container-fluid p-4">
+            @Body
+        </div>
+    </div>
+</div>
+
+@code {
+    private async Task HandleLogout()
+    {
+        await localStorage.RemoveItemAsync("UserSession");
+        Nav.NavigateTo("/login", forceLoad: true);
+    }
+}

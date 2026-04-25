@@ -1,0 +1,83 @@
+﻿@page "/logs"
+@using CorePulse.Shared.DTOs.Responses
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.SignalR.Client
+@inject Blazored.LocalStorage.ILocalStorageService localStorage
+@inject NavigationManager Navigation
+@attribute [Authorize(Roles = "Admin")]
+
+<div class="container-fluid">
+    <h3 class="mb-4">Activity Logs</h3>
+    <div class="card shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive" style="max-height: 70vh; overflow-y: auto;">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Level</th>
+                            <th>Message</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var log in activityLogs)
+                        {
+                            <tr>
+                                <td class="text-muted">@log.Timestamp.ToString("HH:mm:ss")</td>
+                                <td><span class="badge @GetLevelClass(log.Level)">@log.Level</span></td>
+                                <td>@log.Message</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<LogDTO> activityLogs = new();
+    private HubConnection? hubConnection;
+
+    /// <summary>
+    /// Initializes the SignalR connection to listen for real-time system logs.
+    /// Implements a capped list (buffer) to maintain client-side performance.
+    /// </summary>
+    protected async override Task OnInitializedAsync()
+    {
+        var session = await localStorage.GetItemAsync<UserSessionDTO>("UserSession");
+
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl("https://localhost:7039/metricsHub", options =>
+            {
+                options.AccessTokenProvider = () => Task.FromResult(session?.Token);
+            })
+            .WithAutomaticReconnect()
+            .Build();
+
+        // Register listener for incoming broadcast logs from the server
+        hubConnection.On<LogDTO>("ReceiveLog", async (log) =>
+        {
+            if (log == null || activityLogs == null) return;
+            await InvokeAsync(() =>
+                {
+                    activityLogs.Insert(0, log);
+                    if (activityLogs.Count > 100)
+                    {
+                        activityLogs.RemoveAt(100);
+                    }
+                    StateHasChanged();
+                });
+        });
+
+        await hubConnection.StartAsync();
+    }
+
+    private string GetLevelClass(string level) => level switch
+    {
+        "Info" => "bg-info text-dark",
+        "Warning" => "bg-warning text-dark",
+        "Error" => "bg-danger",
+        _ => "bg-secondary"
+    };
+}

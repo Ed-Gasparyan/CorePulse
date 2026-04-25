@@ -1,0 +1,39 @@
+﻿@using CorePulse.Client.Pages
+@using Microsoft.AspNetCore.Components.Authorization
+
+<CascadingAuthenticationState>
+    <Router AppAssembly="@typeof(App).Assembly">
+        <Found Context="routeData">
+            <AuthorizeRouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)">
+                <NotAuthorized Context="authContext">
+                    @if (authContext.User.Identity?.IsAuthenticated != true)
+                    {
+                        <RedirectToLogin />
+                    }
+                    else
+                    {
+                        <div class="container mt-5">
+                            <div class="alert alert-danger shadow-sm text-center">
+                                <h4 class="alert-heading">Access Denied</h4>
+                                <p>You do not have the necessary permissions to view this page. This section is for <b>Administrators</b> only.</p>
+                                <hr>
+                                <a href="/" class="btn btn-outline-danger">Back to Dashboard</a>
+                            </div>
+                        </div>
+                    }
+                </NotAuthorized>
+
+            </AuthorizeRouteView>
+            <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+        </Found>
+        <NotFound>
+            <PageTitle>Not Found</PageTitle>
+            <LayoutView Layout="@typeof(MainLayout)">
+                <div class="container text-center mt-5">
+                    <h1>404</h1>
+                    <p>Sorry, there's nothing at this address.</p>
+                </div>
+            </LayoutView>
+        </NotFound>
+    </Router>
+</CascadingAuthenticationState>

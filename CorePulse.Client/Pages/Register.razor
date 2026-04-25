@@ -1,0 +1,78 @@
+﻿@page "/register"
+@using CorePulse.Shared.DTOs
+@inject HttpClient Http
+@inject NavigationManager NavManager
+
+<EditForm Model="@model" OnValidSubmit="HandleRegisterAsync">
+    <DataAnnotationsValidator />
+
+    <div class="form-group mb-3">
+        <label>Username</label>
+        <InputText @bind-Value="model.UserName" class="form-control" />
+        <ValidationMessage For="@(() => model.UserName)" />
+    </div>
+
+    <div class="form-group mb-3">
+        <label>Email</label>
+        <InputText @bind-Value="model.Email" type="email" class="form-control" />
+        <ValidationMessage For="@(() => model.Email)" />
+    </div>
+
+    <div class="form-group mb-3">
+        <label>Password</label>
+        <InputText @bind-Value="model.Password" type="password" class="form-control" />
+        <ValidationMessage For="@(() => model.Password)" />
+    </div>
+
+    <div class="form-group mb-3">
+        <label>Confirm Password</label>
+        <InputText @bind-Value="model.ConfirmPassword" type="password" class="form-control" />
+        <ValidationMessage For="@(() => model.ConfirmPassword)" />
+    </div>
+
+    <button type="submit" class="btn btn-primary" disabled="@isSubmitting">Register</button>
+</EditForm>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger" role="alert">
+        @errorMessage
+    </div>
+}
+
+@code {
+    private RegisterRequestDTO model = new();
+    private bool isSubmitting = false;
+    private string? errorMessage;
+
+    /// <summary>
+    /// Processes user registration. Redirects to login on success or displays server-side validation errors.
+    /// </summary>
+    private async Task HandleRegisterAsync()
+    {
+        isSubmitting = true;
+        errorMessage = null;
+
+        try
+        {
+            var response = await Http.PostAsJsonAsync("https://localhost:7039/api/auth/register/", model);
+
+            if (response.IsSuccessStatusCode)
+            {
+                NavManager.NavigateTo("/login");
+            }
+            else
+            {
+                errorMessage = await response.Content.ReadAsStringAsync();
+            }
+        }
+        catch (Exception)
+        {
+            errorMessage = "Server communication error. Please try again later.";
+        }
+        finally
+        {
+            isSubmitting = false;
+        }
+    }
+}

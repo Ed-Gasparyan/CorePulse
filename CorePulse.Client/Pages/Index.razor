@@ -1,0 +1,147 @@
+﻿@page "/"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.SignalR.Client
+@inject Blazored.LocalStorage.ILocalStorageService localStorage
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
+@attribute [Authorize]
+
+<PageTitle>CorePulse | Overview</PageTitle>
+
+<div class="container-fluid">
+    <h2 class="mb-4 fw-bold text-dark">System Overview</h2>
+
+    <div class="row g-4 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm h-100 border-start border-success border-5">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <p class="text-muted mb-1 fw-medium">RAM Usage</p>
+                            <h3 class="fw-bold mb-0">@ramUsage GB</h3>
+                        </div>
+                        <div class="bg-success bg-opacity-10 p-3 rounded">
+                            <i class="bi bi-memory text-success fs-3"></i>
+                        </div>
+                    </div>
+                    <div class="progress mt-3" style="height: 6px;">
+                        <div class="progress-bar bg-success" role="progressbar" style="width: 70%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm h-100 border-start border-warning border-5">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <p class="text-muted mb-1 fw-medium">Active Processes</p>
+                            <h3 class="fw-bold mb-0">@processCount</h3>
+                        </div>
+                        <div class="bg-warning bg-opacity-10 p-3 rounded">
+                            <i class="bi bi-list-task text-warning fs-3"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm h-100 border-start border-info border-5">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <p class="text-muted mb-1 fw-medium">Uptime</p>
+                            <h4 class="fw-bold mb-0">@uptime</h4>
+                        </div>
+                        <div class="bg-info bg-opacity-10 p-3 rounded">
+                            <i class="bi bi-clock-history text-info fs-3"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-12">
+            <div class="p-5 bg-white rounded shadow-sm border-0">
+                <h1 class="display-5 fw-bold">Welcome to CorePulse</h1>
+                <p class="col-md-8 fs-4 text-muted">Monitor your system resources in real-time. Manage processes, analyze logs, and keep your pulse on performance.</p>
+                <a href="/metrics" class="btn btn-primary btn-lg px-4 shadow-sm">View Detailed Metrics</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private double cpuUsage = 0;
+    private string ramUsage = "0/0";
+    private int processCount = 0;
+    private string uptime = "00:00:00";
+    private HubConnection? hubConnection;
+
+    /// <summary>
+    /// Initializes the component, retrieves authentication session,
+    /// and establishes a real-time SignalR connection for system metrics.
+    /// </summary>
+    protected override async Task OnInitializedAsync()
+    {
+        // Fetch user session from local storage to access the JWT token
+        var session = await localStorage.GetItemAsync<CorePulse.Shared.DTOs.Responses.UserSessionDTO>("UserSession");
+
+        // Redirect to login if the session is missing or the token is expired/invalid
+        if (session == null || string.IsNullOrEmpty(session.Token))
+        {
+            Navigation.NavigateTo("/login");
+            return;
+        }
+
+        // Initialize the SignalR Hub connection with specialized options
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl("https://localhost:7039/metricsHub", options =>
+            {
+                // Provide the JWT token for every hub request to enable [Authorize] protection
+                options.AccessTokenProvider = () => Task.FromResult<string?>(session.Token);
+            })
+            .WithAutomaticReconnect() // Enable seamless reconnection logic for unstable network conditions
+            .Build();
+
+        // Register a handler for 'ReceiveGlobalMetrics' events broadcasted by the server
+        hubConnection.On<double, string, int, string>("ReceiveGlobalMetrics", (cpu, ram, count, time) =>
+        {
+            // Update local state variables with live data from the server
+            cpuUsage = Math.Round(cpu, 1);
+            ramUsage = ram;
+            processCount = count;
+            uptime = time;
+
+            // Trigger a UI re-render to reflect the updated metrics
+            InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            // Asynchronously start the connection to the hub
+            await hubConnection.StartAsync();
+        }
+        catch (Exception ex)
+        {
+            // Log connection errors for debugging purposes
+            Console.WriteLine($"SignalR Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Ensures that the hub connection is gracefully closed and resources are freed
+    /// when the user navigates away from this component.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (hubConnection != null)
+        {
+            await hubConnection.DisposeAsync();
+        }
+    }
+}
